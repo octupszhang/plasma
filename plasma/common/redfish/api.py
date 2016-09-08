@@ -16,6 +16,7 @@
 import urllib2
 import urllib
 import json
+import requests
 import sys
 import traceback
 import os
@@ -26,10 +27,16 @@ from plasma.common.redfish import tree
 LOG = logging.getLogger(__name__)
 cfg.CONF.import_group('podm', 'plasma.common.redfish.config')
 
+_DEAULT_HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; Win64; x64)',
+            'Content-Type': 'application/json',
+            'Authorization': 'Basic YWRtaW46YWRtaW4='}
+
+_VAILD_POWER_ACTION = [ "On", "ForceOff", "GracefulShutdown", "GracefulRestart", "ForceRestart" ]
 
 def get_rfs_url(serviceext):
     REDFISH_BASE_EXT = "/redfish/v1/"
-    INDEX = '/index.json'
+    INDEX = ''
+    #INDEX = '/index.json'
     if REDFISH_BASE_EXT in serviceext:
         return cfg.CONF.podm.url + serviceext + INDEX
     else:
@@ -43,12 +50,9 @@ def send_request(resource):
     headers = {'User-Agent': user_agent,
                'Authorization': 'Basic YWRtaW46YWRtaW4='}
     req = urllib2.Request(url, None, headers)
-    LOG.debug(url)
     response = urllib2.urlopen(req)
     jsonContent = response.read()
-    # LOG.debug(jsonContent)
-    return json.loads(jsonContent)
-
+    return json.loads(jsonContent.replace("\n", ""))
 
 def filter_chassis(jsonContent, filterCondition):
     returnJSONObj = {}
@@ -94,59 +98,6 @@ def generic_filter(jsonContent, filterConditions):
     LOG.info(" JSON CONTENT " + str(is_filter_passed))
     return is_filter_passed
 
-
-def get_details(source):
-    returnJSONObj = {}
-    returnMembers = []
-    count = source['Members@odata.count']
-    members = source['Members']
-    for member in members:
-        resource = member['@odata.id']
-        memberJson = send_request(resource)
-        memberJsonObj = json.loads(memberJson)
-        returnJSONObj[resource] = memberJsonObj
-    return returnJSONObj
-
-
-def systemdetails():
-    returnJSONObj = {}
-    returnJSONMembers = []
-    parsed = send_request('Systems')
-    members = parsed['Members']
-    for member in members:
-        resource = member['@odata.id']
-        memberJsonContent = send_request(resource)
-        memberJSONObj = json.loads(memberJsonContent)
-        returnJSONObj[resource] = memberJSONObj
-    return(json.dumps(returnJSONObj))
-
-
-def nodedetails():
-    returnJSONObj = {}
-    returnJSONMembers = []
-    parsed = send_request('Nodes')
-    members = parsed['Members']
-    for member in members:
-        resource = member['@odata.id']
-        memberJSONObj = send_request(resource)
-        returnJSONObj[resource] = memberJSONObj
-    return(json.dumps(returnJSONObj))
-
-
-def podsdetails():
-    jsonContent = send_request('Chassis')
-    pods = filter_chassis(jsonContent, 'Pod')
-    podsDetails = get_details(pods)
-    return json.dumps(podsDetails)
-
-
-def racksdetails():
-    jsonContent = send_request('Chassis')
-    racks = filter_chassis(jsonContent, 'Rack')
-    racksDetails = get_details(racks)
-    return json.dumps(racksDetails)
-
-
 def racks():
     jsonContent = send_request('Chassis')
     racks = filter_chassis(jsonContent, 'Rack')
@@ -162,8 +113,6 @@ def pods():
 def urls2list(url):
     # This will extract the url values from @odata.id inside Members
     respdata = send_request(url)
-    print type(respdata).__name__
-    print respdata
     return [u['@odata.id'] for u in respdata['Members']]
 
 
@@ -182,7 +131,8 @@ def node_cpu_details(nodeurl):
     for lnk in cpulist:
         LOG.info("Processing CPU %s" % lnk)
         respdata = send_request(lnk)
-        cpucnt += extract_val(respdata, "TotalCores")
+        cores = extract_val(respdata, "TotalCores") or 1
+        cpucnt += cores
         cpuarch = extract_val(respdata, "InstructionSet")
         cpumodel = extract_val(respdata, "Model")
         LOG.debug(" Cpu details %s: %d: %s: %s "
@@ -223,56 +173,9 @@ def node_storage_details(nodeurl):
 
 
 def systems_list(count=None, filters={}):
-    # comment the count value which is set to 2 now..
-    # list of nodes with hardware details needed for flavor creation
-    count = 2
-    lst_nodes = []
-    systemurllist = urls2list("Systems")
-    podmtree = build_hierarchy_tree()
-    for lnk in systemurllist[:count]:
-        filterPassed = True
-        system = send_request(lnk)
-
-        # this below code need to be changed when proper query mechanism
-        # is implemented
-        if any(filters):
-             filterPassed = generic_filter(system, filters)
-        if not filterPassed:
-              continue
-
-        nodeid = lnk.split("/")[-1]
-        nodeuuid = system['UUID']
-        nodelocation = podmtree.getPath(lnk)
-        cpu = node_cpu_details(lnk)
-        ram = node_ram_details(lnk)
-        nw = node_nw_details(lnk)
-        storage = node_storage_details(lnk)
-        bmcip = system['Oem']['Dell_G5MC']['BmcIp']
-        bmcmac = system['Oem']['Dell_G5MC']['BmcMac']
-        node = {"nodeid": nodeid, "cpu": cpu,
-                "ram": ram, "storage": storage,
-                "nw": nw, "location": nodelocation,
-                "uuid": nodeuuid, "bmcip": bmcip, "bmcmac": bmcmac}
-
-
-        # filter based on RAM, CPU, NETWORK..etc
-        if 'ram' in filters:
-            filterPassed = (True if int(ram) >= int(filters['ram']) else False)
-
-        # filter based on RAM, CPU, NETWORK..etc
-        if 'nw' in filters:
-            filterPassed = (True if int(nw) >= int(filters['nw']) else False)
-
-        # filter based on RAM, CPU, NETWORK..etc
-        if 'storage' in filters:
-            filterPassed = (True if int(storage) >= int(filters['storage']) else False)
-
-	
-        if filterPassed:
-            lst_nodes.append(node)
-        #LOG.info(str(node))
-    return lst_nodes
-
+    nodesurllist = urls2list("Nodes")
+    nodes_list = {'nodes':[url.split('/')[-1] for url in nodesurllist]}
+    return json.dumps(nodes_list)
 
 def get_chassis_list():
     chassis_lnk_lst = urls2list("Chassis")
@@ -289,10 +192,9 @@ def get_chassis_list():
                 for c in linksdata["Contains"]:
                     contains.append(c['@odata.id'].split("/")[-1])
 
-            if "ContainedBy" in linksdata:
+            if linksdata.get("ContainedBy"):
                 odata = linksdata["ContainedBy"]['@odata.id']
                 containedby = odata.split("/")[-1]
-
             if "ComputerSystems" in linksdata:
                 for c in linksdata["ComputerSystems"]:
                     computersystems.append(c['@odata.id'])
@@ -309,8 +211,52 @@ def get_chassis_list():
 
 
 def get_nodebyid(nodeid):
-    return json.dumps(send_request("Systems/" + nodeid))
+    return json.dumps(send_request("Nodes/" + nodeid))
 
+
+def assemble_node(node_id):
+    data = '{}'
+    url = get_rfs_url('Nodes/%s/Actions/ComposedNode.Assemble' % node_id)
+    res = requests.post(url, data=data, headers=_DEAULT_HEADERS, verify=False)
+    return res.content
+
+
+def set_boot_source(node_id, boot_source):
+    data = '{"Boot":{"BootSourceOverrideEnabled":"Once","BootSourceOverrideTarget":"%s"}}' % boot_source
+    url = get_rfs_url('Nodes/%s' % node_id)
+    res = requests.patch(url, data=data, headers=_DEAULT_HEADERS, verify=False)
+    return res.content
+
+
+def power_manage(power_args):
+    node_id = power_args.get('node_id')
+    power_action = power_args.get('power_action')
+    if power_action not in _VAILD_POWER_ACTION:
+        raise
+    data = '{"ResetType":"%s"}' % power_action
+    url = get_rfs_url('Nodes/%s/Actions/ComposedNode.Reset' % node_id)
+    res = requests.post(url, data=data, headers=_DEAULT_HEADERS, verify=False)
+    return res.content
+
+def allocate_node(data):
+    data = json.dumps(data)
+    url = get_rfs_url('Nodes/Actions/Allocate')
+    res=requests.post(url, data=data, headers=_DEAULT_HEADERS, verify=False)
+    if not res.ok:
+        raise
+    node_id=json.loads(systems_list())['nodes'][-1]
+    return get_nodebyid(node_id)
+
+def delete_node(node_id):
+    url = get_rfs_url('Nodes/%s' % node_id)
+    res=requests.delete(url, headers=_DEAULT_HEADERS, verify=False)
+    return res.content
+
+def compose_nodes(data):
+    node = allocate_node(data)
+    node_id = json.loads(node).get('Id')
+    assemble_node(node_id)
+    return node
 
 def build_hierarchy_tree():
     # builds the tree sturcture of the PODM data to get the location hierarchy
@@ -328,3 +274,4 @@ def build_hierarchy_tree():
             sysname = sys.split("/")[-2] + ":" + sys.split("/")[-1]
             podmtree.add_node(sys, {"name": sysname}, d["ChassisID"])
     return podmtree
+

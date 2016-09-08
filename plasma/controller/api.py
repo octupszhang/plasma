@@ -50,8 +50,14 @@ class API(rpc_service.API):
     def get_nodebyid(self, nodeid):
         return self._call('get_nodebyid', nodeid=nodeid)
 
-    def delete_composednode(self, criteria):
-        return self._call('delete_composednode')
+    def power_manage(self, power_args):
+        return self._call('power_manage', power_args=power_args)
+
+    def set_boot_source(self, node_id, boot_source):
+        return self._call('set_boot_source', node_id=node_id, boot_source=boot_source)
+
+    def delete_composednode(self, node_id):
+        return self._call('delete_composednode', node_id=node_id)
 
     def update_node(self, nodeid):
         return self._call('update_node')

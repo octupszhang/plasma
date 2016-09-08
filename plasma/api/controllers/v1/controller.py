@@ -80,3 +80,5 @@ class V1Controller(object):
 
 route(V1Controller, 'flavor',  v1flavor.FlavorController())
 route(V1Controller, 'nodes',  v1nodes.NodesController())
+route(V1Controller, 'power',  v1nodes.NodePowerController())
+route(V1Controller, 'bootsource',  v1nodes.NodeBootSourceController())

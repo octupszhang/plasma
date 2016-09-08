@@ -41,7 +41,7 @@ class NodesController(RestController):
         super(NodesController, self).__init__(*args, **kwargs)
 
     # HTTP GET /nodes/
-    @expose(generic=True, template='json')
+    @expose(generic=True)
     def index(self, **kwargs):
         LOG.debug("GET /nodes")
         rpcapi = controller_api.API(context=request.context)
@@ -49,14 +49,14 @@ class NodesController(RestController):
         return res
 
     # HTTP GET /nodes/
-    @index.when(method='POST', template='json')
+    @index.when(method='POST')
     def post(self, **kwargs):
         LOG.debug("POST /nodes")
         rpcapi = controller_api.API(context=request.context)
         res = rpcapi.compose_nodes(criteria=kwargs)
         return res
 
-    @expose(template='json')
+    @expose(generic=True)
     def get(self, nodeid):
         LOG.debug("POST /nodes" + nodeid)
         rpcapi = controller_api.API(context=request.context)
@@ -65,6 +65,12 @@ class NodesController(RestController):
             pecan.abort(404)
         return node
 
+    @expose(generic=True)
+    def delete(self, node_id):
+        rpcapi = controller_api.API(context=request.context)
+        res = rpcapi.delete_composednode(node_id)
+        return res
+
     @expose()
     def _lookup(self, nodeid, *remainder):
         # node  = get_student_by_primary_key(primary_key)
@@ -72,3 +78,28 @@ class NodesController(RestController):
             return NodeDetailController(nodeid), remainder
         else:
             pecan.abort(404)
+
+
+class NodePowerController(RestController):
+
+    def __init__(self, *args, **kwargs):
+        super(NodePowerController, self).__init__(*args, **kwargs)
+    
+    @expose(method='POST', template='json')
+    def post(self, **kwargs):
+        rpcapi = controller_api.API(context=request.context)
+        res = rpcapi.power_manage(kwargs)
+        return res
+
+
+class NodeBootSourceController(RestController):
+
+    def __init__(self, *args, **kwargs):
+        super(NodeBootSourceController, self).__init__(*args, **kwargs)
+
+    @expose(method='POST', template='json')
+    def post(self, node_id, boot_source):
+        rpcapi = controller_api.API(context=request.context)
+        res = rpcapi.set_boot_source(node_id=node_id, boot_source=boot_source)
+        return res
+
